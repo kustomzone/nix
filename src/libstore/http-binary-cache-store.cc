@@ -89,13 +89,13 @@ void HttpBinaryCacheStore::init()
     }
 }
 
-std::optional<CompressionAlgo> HttpBinaryCacheStore::getCompressionMethod(const std::string & path)
+std::optional<CompressionAlgo> HttpBinaryCacheStore::getCompressionMethod(const CanonPath & path)
 {
-    if (hasSuffix(path, ".narinfo") && config->narinfoCompression.get())
+    if (hasSuffix(path.rel(), ".narinfo") && config->narinfoCompression.get())
         return config->narinfoCompression;
-    else if (hasSuffix(path, ".ls") && config->lsCompression.get())
+    else if (hasSuffix(path.rel(), ".ls") && config->lsCompression.get())
         return config->lsCompression;
-    else if (hasPrefix(path, "log/") && config->logCompression.get())
+    else if (path.isWithin(CanonPath::fromFilename("log")) && config->logCompression.get())
         return config->logCompression;
     else
         return std::nullopt;
@@ -125,12 +125,12 @@ void HttpBinaryCacheStore::checkEnabled()
     throw SubstituterDisabled("substituter '%s' is disabled", config->getHumanReadableURI());
 }
 
-bool HttpBinaryCacheStore::fileExists(const std::string & path)
+bool HttpBinaryCacheStore::fileExists(const CanonPath & path)
 {
     checkEnabled();
 
     try {
-        FileTransferRequest request(makeRequest(path));
+        FileTransferRequest request(makeRequest(path.rel()));
         request.method = HttpMethod::Head;
         fileTransfer->download(request);
         return true;
@@ -166,7 +166,7 @@ void HttpBinaryCacheStore::upload(
 }
 
 void HttpBinaryCacheStore::upsertFile(
-    const std::string & path, RestartableSource & source, const std::string & mimeType, uint64_t sizeHint)
+    const CanonPath & path, RestartableSource & source, const std::string & mimeType, uint64_t sizeHint)
 {
     try {
         if (auto compressionMethod = getCompressionMethod(path)) {
@@ -174,9 +174,9 @@ void HttpBinaryCacheStore::upsertFile(
             /* TODO: Validate that this is a valid content encoding. We probably shouldn't set non-standard values here.
              */
             Headers headers = {{"Content-Encoding", showCompressionAlgo(*compressionMethod)}};
-            upload(path, compressed, compressed.size(), mimeType, std::move(headers));
+            upload(path.rel(), compressed, compressed.size(), mimeType, std::move(headers));
         } else {
-            upload(path, source, sizeHint, mimeType, std::nullopt);
+            upload(path.rel(), source, sizeHint, mimeType, std::nullopt);
         }
     } catch (FileTransferError & e) {
         UploadToHTTP err(e.message());
@@ -225,29 +225,43 @@ FileTransferRequest HttpBinaryCacheStore::makeRequest(std::string_view path)
     return request;
 }
 
-void HttpBinaryCacheStore::getFile(const std::string & path, Sink & sink)
+void HttpBinaryCacheStore::getFileImpl(
+    FileTransferRequest && request, Sink & sink, std::function<NoSuchBinaryCacheFile()> makeError)
 {
     checkEnabled();
-    auto request(makeRequest(path));
     try {
         fileTransfer->download(std::move(request), sink);
     } catch (FileTransferError & e) {
         if (e.error == FileTransfer::NotFound || e.error == FileTransfer::Forbidden)
-            throw NoSuchBinaryCacheFile(
-                "file '%s' does not exist in binary cache '%s'", path, config->getHumanReadableURI());
+            throw makeError();
         maybeDisable();
         throw;
     }
 }
 
-void HttpBinaryCacheStore::getFile(const std::string & path, Callback<std::optional<std::string>> callback) noexcept
+void HttpBinaryCacheStore::getFile(const CanonPath & path, Sink & sink)
+{
+    getFileImpl(makeRequest(path.rel()), sink, [&]() {
+        return NoSuchBinaryCacheFile(
+            "file '%s' does not exist in binary cache '%s'", path, config->getHumanReadableURI());
+    });
+}
+
+void HttpBinaryCacheStore::getFile(const ParsedURL & url, Sink & sink)
+{
+    getFileImpl(makeRequest(url.to_string()), sink, [&]() {
+        return NoSuchBinaryCacheFile("file '%s' does not exist", url.to_string());
+    });
+}
+
+void HttpBinaryCacheStore::getFile(const CanonPath & path, Callback<std::optional<std::string>> callback) noexcept
 {
     auto callbackPtr = std::make_shared<decltype(callback)>(std::move(callback));
 
     try {
         checkEnabled();
 
-        auto request(makeRequest(path));
+        auto request(makeRequest(path.rel()));
 
         fileTransfer->enqueueFileTransfer(request, {[callbackPtr, this](std::future<FileTransferResult> result) {
                                               try {
@@ -272,7 +286,7 @@ void HttpBinaryCacheStore::getFile(const std::string & path, Callback<std::optio
 std::optional<std::string> HttpBinaryCacheStore::getNixCacheInfo()
 {
     try {
-        auto result = fileTransfer->download(makeRequest(cacheInfoFile));
+        auto result = fileTransfer->download(makeRequest(cacheInfoFile.rel()));
         return result.data;
     } catch (FileTransferError & e) {
         if (e.error == FileTransfer::NotFound)

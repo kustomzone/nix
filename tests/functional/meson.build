@@ -65,6 +65,7 @@ suites = [
       'user-envs.sh',
       'user-envs-migration.sh',
       'binary-cache.sh',
+      'binary-cache-absolute-url.sh',
       'multiple-outputs.sh',
       'nix-build.sh',
       'gc-concurrent.sh',

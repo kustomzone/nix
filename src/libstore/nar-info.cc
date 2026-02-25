@@ -6,6 +6,34 @@
 
 namespace nix {
 
+NarUrl parseNarUrl(std::string_view value)
+{
+    if (value.find("://") != std::string_view::npos)
+        return parseURL(std::string{value});
+    else
+        return CanonPath{value};
+}
+
+std::string narUrlToString(const NarUrl & url)
+{
+    return std::visit(
+        overloaded{
+            [](const CanonPath & path) { return std::string{path.rel()}; },
+            [](const ParsedURL & u) { return u.to_string(); },
+        },
+        url);
+}
+
+bool narUrlEmpty(const NarUrl & url)
+{
+    return std::visit(
+        overloaded{
+            [](const CanonPath & path) { return path.isRoot(); },
+            [](const ParsedURL &) { return false; },
+        },
+        url);
+}
+
 NarInfo::NarInfo(const StoreDirConfig & store, const std::string & s, const std::string & whence)
     : UnkeyedValidPathInfo(store, Hash::dummy)                                          // FIXME: hack
     , ValidPathInfo(StorePath::dummy, static_cast<const UnkeyedValidPathInfo &>(*this)) // FIXME: hack
@@ -50,7 +78,7 @@ NarInfo::NarInfo(const StoreDirConfig & store, const std::string & s, const std:
             path = store.parseStorePath(value);
             havePath = true;
         } else if (name == "URL")
-            url = value;
+            url = parseNarUrl(value);
         else if (name == "Compression")
             compression = value;
         else if (name == "FileHash")
@@ -93,14 +121,14 @@ NarInfo::NarInfo(const StoreDirConfig & store, const std::string & s, const std:
     if (compression == "")
         compression = "bzip2";
 
-    if (!havePath || !haveNarHash || url.empty() || narSize == 0) {
+    if (!havePath || !haveNarHash || narUrlEmpty(url) || narSize == 0) {
         line = 0; // don't include line information in the error
         throw corrupt(
-            !havePath      ? "StorePath missing"
-            : !haveNarHash ? "NarHash missing"
-            : url.empty()  ? "URL missing"
-            : narSize == 0 ? "NarSize missing or zero"
-                           : "?");
+            !havePath          ? "StorePath missing"
+            : !haveNarHash     ? "NarHash missing"
+            : narUrlEmpty(url) ? "URL missing"
+            : narSize == 0     ? "NarSize missing or zero"
+                               : "?");
     }
 }
 
@@ -108,7 +136,7 @@ std::string NarInfo::to_string(const StoreDirConfig & store) const
 {
     std::string res;
     res += "StorePath: " + store.printStorePath(path) + "\n";
-    res += "URL: " + url + "\n";
+    res += "URL: " + narUrlToString(url) + "\n";
     assert(compression != "");
     res += "Compression: " + compression + "\n";
     assert(fileHash && fileHash->algo == HashAlgorithm::SHA256);
@@ -140,8 +168,8 @@ UnkeyedNarInfo::toJSON(const StoreDirConfig * store, bool includeImpureInfo, Pat
     auto jsonObject = UnkeyedValidPathInfo::toJSON(store, includeImpureInfo, format);
 
     if (includeImpureInfo) {
-        if (!url.empty())
-            jsonObject["url"] = url;
+        if (!narUrlEmpty(url))
+            jsonObject["url"] = narUrlToString(url);
         if (!compression.empty())
             jsonObject["compression"] = compression;
         if (fileHash) {
@@ -168,7 +196,7 @@ UnkeyedNarInfo UnkeyedNarInfo::fromJSON(const StoreDirConfig * store, const nloh
         format = *version;
 
     if (auto * url = get(obj, "url"))
-        res.url = getString(*url);
+        res.url = parseNarUrl(getString(*url));
 
     if (auto * compression = get(obj, "compression"))
         res.compression = getString(*compression);

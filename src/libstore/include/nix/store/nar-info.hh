@@ -4,21 +4,58 @@
 #include "nix/util/compression-algo.hh"
 #include "nix/util/types.hh"
 #include "nix/util/hash.hh"
+#include "nix/util/url.hh"
+#include "nix/util/canon-path.hh"
 #include "nix/store/path-info.hh"
+
+#include <variant>
 
 namespace nix {
 
 struct StoreDirConfig;
 
+/**
+ * The URL field in a narinfo can be either:
+ *
+ * - A relative path within the binary cache (e.g., "nar/xxx.nar.xz").
+ *
+ *   This is the normal case which should be used.
+ *
+ * - An absolute URL pointing elsewhere (e.g., "https://example.com/nar/xxx.nar.xz")
+ *
+ *   This is an odd case that is somewhat an accidental feature. Only
+ *   some types of `BinaryCacheStores` will support it, and only with
+ *   restrictions.
+ */
+using NarUrl = std::variant<CanonPath, ParsedURL>;
+
+/**
+ * Parse a `.narinfo` URL string into a `NarUrl`.
+ * If it looks like an absolute URL (contains "://"), parse as ParsedURL.
+ * Otherwise, treat as a relative path within the binary cache.
+ */
+NarUrl parseNarUrl(std::string_view value);
+
+/**
+ * Convert a `NarUrl` to a string for serialization.
+ */
+std::string narUrlToString(const NarUrl & url);
+
+/**
+ * Check if a `NarUrl` is empty (root path or invalid).
+ */
+bool narUrlEmpty(const NarUrl & url);
+
 struct UnkeyedNarInfo : virtual UnkeyedValidPathInfo
 {
-    std::string url;
+    NarUrl url;
     std::string compression; // FIXME: Use CompressionAlgo
     std::optional<Hash> fileHash;
     uint64_t fileSize = 0;
 
     UnkeyedNarInfo(UnkeyedValidPathInfo info)
         : UnkeyedValidPathInfo(std::move(info))
+        , url{CanonPath::root}
     {
     }
 

@@ -3,6 +3,7 @@
 #include "nix/store/nar-info-disk-cache.hh"
 #include "nix/util/signals.hh"
 #include "nix/store/store-registration.hh"
+#include "nix/util/url.hh"
 
 #include <atomic>
 
@@ -29,7 +30,7 @@ StoreReference LocalBinaryCacheStoreConfig::getReference() const
         .variant =
             StoreReference::Specified{
                 .scheme = "file",
-                .authority = binaryCacheDir.string(),
+                .authority = encodeUrlPath(pathToUrlPath(binaryCacheDir)),
             },
     };
 }
@@ -51,13 +52,12 @@ struct LocalBinaryCacheStore : virtual BinaryCacheStore
 
 protected:
 
-    bool fileExists(const std::string & path) override;
+    bool fileExists(const CanonPath & path) override;
 
     void upsertFile(
-        const std::string & path, RestartableSource & source, const std::string & mimeType, uint64_t sizeHint) override
+        const CanonPath & path, RestartableSource & source, const std::string & mimeType, uint64_t sizeHint) override
     {
-        assert(!std::filesystem::path(path).is_absolute());
-        auto path2 = config->binaryCacheDir / path;
+        auto path2 = config->binaryCacheDir / path.rel();
         static std::atomic<int> counter{0};
         createDirs(path2.parent_path());
         auto tmp = path2;
@@ -68,11 +68,10 @@ protected:
         del.cancel();
     }
 
-    void getFile(const std::string & path, Sink & sink) override
+    void getFile(const CanonPath & path, Sink & sink) override
     {
-        assert(!std::filesystem::path(path).is_absolute());
         try {
-            readFile(config->binaryCacheDir / path, sink);
+            readFile(config->binaryCacheDir / path.rel(), sink);
         } catch (SystemError & e) {
             if (e.is(std::errc::no_such_file_or_directory))
                 throw NoSuchBinaryCacheFile("file '%s' does not exist in binary cache", path);
@@ -104,17 +103,16 @@ protected:
 void LocalBinaryCacheStore::init()
 {
     createDirs(config->binaryCacheDir / "nar");
-    createDirs(config->binaryCacheDir / realisationsPrefix);
+    createDirs(config->binaryCacheDir / realisationsPrefix.rel());
     if (config->writeDebugInfo)
         createDirs(config->binaryCacheDir / "debuginfo");
     createDirs(config->binaryCacheDir / "log");
     BinaryCacheStore::init();
 }
 
-bool LocalBinaryCacheStore::fileExists(const std::string & path)
+bool LocalBinaryCacheStore::fileExists(const CanonPath & path)
 {
-    assert(!std::filesystem::path(path).is_absolute());
-    return pathExists(config->binaryCacheDir / path);
+    return pathExists(config->binaryCacheDir / path.rel());
 }
 
 StringSet LocalBinaryCacheStoreConfig::uriSchemes()

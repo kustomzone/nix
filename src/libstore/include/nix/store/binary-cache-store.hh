@@ -1,9 +1,12 @@
 #pragma once
 ///@file
 
+#include "nix/util/canon-path.hh"
 #include "nix/util/compression-settings.hh"
+#include "nix/util/url.hh"
 #include "nix/store/store-api.hh"
 #include "nix/store/log-store.hh"
+#include "nix/store/nar-info.hh"
 
 #include "nix/util/pool.hh"
 
@@ -11,7 +14,6 @@
 
 namespace nix {
 
-struct NarInfo;
 class RemoteFSAccessor;
 
 struct BinaryCacheStoreConfig : virtual StoreConfig
@@ -92,9 +94,9 @@ protected:
     /**
      * The prefix under which realisation infos will be stored
      */
-    constexpr const static std::string realisationsPrefix = "realisations";
+    inline static const CanonPath realisationsPrefix = CanonPath::fromFilename("realisations");
 
-    constexpr const static std::string cacheInfoFile = "nix-cache-info";
+    inline static const CanonPath cacheInfoFile = CanonPath::fromFilename("nix-cache-info");
 
     BinaryCacheStore(Config &);
 
@@ -103,24 +105,24 @@ protected:
      *
      * It's `${realisationsPrefix}/${drvOutput}.doi`.
      */
-    std::string makeRealisationPath(const DrvOutput & id);
+    CanonPath makeRealisationPath(const DrvOutput & id);
 
 public:
 
-    virtual bool fileExists(const std::string & path) = 0;
+    virtual bool fileExists(const CanonPath & path) = 0;
 
-    virtual void upsertFile(
-        const std::string & path, RestartableSource & source, const std::string & mimeType, uint64_t sizeHint) = 0;
+    virtual void
+    upsertFile(const CanonPath & path, RestartableSource & source, const std::string & mimeType, uint64_t sizeHint) = 0;
 
     void upsertFile(
-        const std::string & path,
+        const CanonPath & path,
         // FIXME: use std::string_view
         std::string && data,
         const std::string & mimeType,
         uint64_t sizeHint);
 
     void upsertFile(
-        const std::string & path,
+        const CanonPath & path,
         // FIXME: use std::string_view
         std::string && data,
         const std::string & mimeType)
@@ -132,7 +134,18 @@ public:
     /**
      * Dump the contents of the specified file to a sink.
      */
-    virtual void getFile(const std::string & path, Sink & sink);
+    virtual void getFile(const CanonPath & path, Sink & sink);
+
+    /**
+     * Fetch the contents of an absolute URL to a sink.
+     * Default implementation throws; subclasses with network support override.
+     */
+    virtual void getFile(const ParsedURL & url, Sink & sink);
+
+    /**
+     * Fetch from a `NarUrl`, dispatching to the appropriate method.
+     */
+    void getFile(const NarUrl & url, Sink & sink);
 
     /**
      * Get the contents of /nix-cache-info. Return std::nullopt if it
@@ -144,9 +157,9 @@ public:
      * Fetch the specified file and call the specified callback with
      * the result. A subclass may implement this asynchronously.
      */
-    virtual void getFile(const std::string & path, Callback<std::optional<std::string>> callback) noexcept;
+    virtual void getFile(const CanonPath & path, Callback<std::optional<std::string>> callback) noexcept;
 
-    std::optional<std::string> getFile(const std::string & path);
+    std::optional<std::string> getFile(const CanonPath & path);
 
 public:
 
@@ -156,7 +169,7 @@ private:
 
     std::string narMagic;
 
-    std::string narInfoFileFor(const StorePath & storePath);
+    CanonPath narInfoFileFor(const StorePath & storePath);
 
     void writeNarInfo(ref<NarInfo> narInfo);
 

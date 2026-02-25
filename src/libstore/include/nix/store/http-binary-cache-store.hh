@@ -7,6 +7,7 @@
 #include "nix/util/sync.hh"
 
 #include <chrono>
+#include <functional>
 
 namespace nix {
 
@@ -87,16 +88,16 @@ public:
 
 protected:
 
-    std::optional<CompressionAlgo> getCompressionMethod(const std::string & path);
+    std::optional<CompressionAlgo> getCompressionMethod(const CanonPath & path);
 
     void maybeDisable();
 
     void checkEnabled();
 
-    bool fileExists(const std::string & path) override;
+    bool fileExists(const CanonPath & path) override;
 
     void upsertFile(
-        const std::string & path, RestartableSource & source, const std::string & mimeType, uint64_t sizeHint) override;
+        const CanonPath & path, RestartableSource & source, const std::string & mimeType, uint64_t sizeHint) override;
 
     FileTransferRequest makeRequest(std::string_view path);
 
@@ -120,9 +121,18 @@ protected:
         std::string_view mimeType,
         std::optional<Headers> headers);
 
-    void getFile(const std::string & path, Sink & sink) override;
+    void getFile(const CanonPath & path, Sink & sink) override;
 
-    void getFile(const std::string & path, Callback<std::optional<std::string>> callback) noexcept override;
+    void getFile(const ParsedURL & url, Sink & sink) override;
+
+    void getFileImpl(FileTransferRequest && request, Sink & sink, std::function<NoSuchBinaryCacheFile()> makeError);
+
+    /**
+     * This is just used for the build trace, and we don't need to
+     * support a `VerbatimUrl` version of this. (It's not grandfathered
+     * in.)
+     */
+    void getFile(const CanonPath & path, Callback<std::optional<std::string>> callback) noexcept override;
 
     std::optional<std::string> getNixCacheInfo() override;
 

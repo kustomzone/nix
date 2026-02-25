@@ -371,6 +371,9 @@ std::filesystem::path urlPathToPath(std::span<const std::string> urlPath);
  * not strictly RFC3986 compliant. We must preserve that information verbatim.
  *
  * Though we perform parsing and validation for internal needs.
+ *
+ * There is intentionally no `operator==` on `VerbatimURL` because
+ * equality on string-based ad-hoc URLs is not well-defined.
  */
 struct VerbatimURL
 {

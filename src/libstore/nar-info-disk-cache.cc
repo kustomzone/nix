@@ -265,7 +265,7 @@ public:
                 auto namePart = queryNAR.getStr(1);
                 auto narInfo = make_ref<NarInfo>(
                     cache.storeDir, StorePath(hashPart + "-" + namePart), Hash::parseAnyPrefixed(queryNAR.getStr(6)));
-                narInfo->url = queryNAR.getStr(2);
+                narInfo->url = parseNarUrl(queryNAR.getStr(2));
                 narInfo->compression = queryNAR.getStr(3);
                 if (!queryNAR.isNull(4))
                     narInfo->fileHash = Hash::parseAnyPrefixed(queryNAR.getStr(4));
@@ -331,7 +331,8 @@ public:
 
                 state->insertNAR
                     .use()(cache.id)(hashPart) (std::string(info->path.name()))(
-                        narInfo ? narInfo->url : "", narInfo != 0)(narInfo ? narInfo->compression : "", narInfo != 0)(
+                        narInfo ? narUrlToString(narInfo->url) : "",
+                        narInfo != 0)(narInfo ? narInfo->compression : "", narInfo != 0)(
                         narInfo && narInfo->fileHash ? narInfo->fileHash->to_string(HashFormat::Nix32, true) : "",
                         narInfo && narInfo->fileHash)(
                         narInfo ? narInfo->fileSize : 0, narInfo != 0 && narInfo->fileSize)(info->narHash.to_string(
